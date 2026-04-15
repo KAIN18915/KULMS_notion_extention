@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KU Student PDF to Notion</title>
+  <style>
+    :root {
+      --bg: #f7f6f2;
+      --surface: #ffffff;
+      --text: #1f1f1f;
+      --muted: #666;
+      --border: #d9d9d9;
+      --primary: #0b6b6f;
+      --primary-2: #09565a;
+      --danger: #9f2c4a;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      width: 380px;
+    }
+    .wrap { padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    p { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0 0 12px; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+    input, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 13px;
+      background: #fff;
+      margin-bottom: 10px;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    button {
+      width: 100%;
+      border: none;
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+    .primary { background: var(--primary); color: #fff; }
+    .primary:hover { background: var(--primary-2); }
+    .secondary { background: #eef4f4; color: var(--text); }
+    .danger { background: #f9ecef; color: var(--danger); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .status {
+      white-space: pre-wrap;
+      font-size: 12px;
+      color: var(--muted);
+      background: #fafafa;
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      min-height: 72px;
+    }
+    .small { font-size: 11px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>KU Student PDF to Notion</h1>
+    <p>学内サイトでログインとOTPを終えた状態で、PDFリンクを検出してNotionページへ送ります。</p>
+
+    <div class="card">
+      <label for="notionToken">Notion Integration Token</label>
+      <input id="notionToken" type="password" placeholder="secret_xxx">
+
+      <label for="pageId">Notion Page ID</label>
+      <input id="pageId" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+
+      <label for="allowedHosts">許可ホスト（改行区切り、任意）</label>
+      <textarea id="allowedHosts" placeholder="pandora.ecs.kyoto-u.ac.jp\nexample.ac.jp"></textarea>
+
+      <button id="saveSettings" class="secondary">設定を保存</button>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button id="scanPage" class="secondary">このページを検出</button>
+        <button id="uploadCurrent" class="primary">検出PDFを送信</button>
+      </div>
+      <button id="uploadManual" class="secondary">現在タブのURLをPDFとして送信</button>
+      <button id="clearState" class="danger">検出状態を消去</button>
+      <div id="status" class="status">準備中...</div>
+      <p class="small">注: OTP入力そのものは自動化しません。ログイン完了後の認証済みセッションだけを利用します。</p>
+    </div>
+  </div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
