@@ -19,8 +19,36 @@ async function getActiveTab() {
   return tab;
 }
 
-function sanitizePageId(pageId) {
-  return (pageId || '').replace(/[^a-fA-F0-9]/g, '');
+function normalizePageIdInput(input) {
+  const value = (input || '').trim();
+  if (!value) return '';
+
+  const compactHex = value.replace(/[^a-fA-F0-9]/g, '');
+
+  if (compactHex.length === 32) {
+    return compactHex.toLowerCase();
+  }
+
+  if (compactHex.length > 32) {
+    const candidates = compactHex.match(/[a-fA-F0-9]{32}/g);
+    if (candidates?.length) {
+      return candidates[candidates.length - 1].toLowerCase();
+    }
+  }
+
+  try {
+    const url = new URL(value);
+    const decodedPath = decodeURIComponent(url.pathname);
+
+    const pathCandidates = decodedPath.match(/[a-fA-F0-9]{32}/g);
+    if (pathCandidates?.length) {
+      return pathCandidates[pathCandidates.length - 1].toLowerCase();
+    }
+  } catch {
+    // URLでなくても無視
+  }
+
+  throw new Error('Page ID は32文字のID、UUID、またはNotionページURLを入力してください。');
 }
 
 async function loadSettings() {
@@ -28,6 +56,7 @@ async function loadSettings() {
   el.notionToken.value = data.notionToken || '';
   el.pageId.value = data.pageId || '';
   el.allowedHosts.value = (data.allowedHosts || []).join('\n');
+
   const state = await chrome.storage.local.get(['lastDetected']);
   if (state.lastDetected?.url) {
     setStatus(`検出済みPDF:\n${state.lastDetected.url}`);
@@ -38,9 +67,14 @@ async function loadSettings() {
 
 async function saveSettings() {
   const notionToken = el.notionToken.value.trim();
-  const pageId = sanitizePageId(el.pageId.value.trim());
-  const allowedHosts = el.allowedHosts.value.split(/\n+/).map(v => v.trim()).filter(Boolean);
+  const pageId = normalizePageIdInput(el.pageId.value);
+  const allowedHosts = el.allowedHosts.value
+    .split(/\n+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+
   await chrome.storage.sync.set({ notionToken, pageId, allowedHosts });
+  el.pageId.value = pageId;
   setStatus('設定を保存しました。');
 }
 
@@ -55,6 +89,7 @@ async function upload(payload) {
   if (!settings.notionToken || !settings.pageId) {
     throw new Error('Notion Token と Page ID を設定してください。');
   }
+
   const tab = await getActiveTab();
   const response = await chrome.runtime.sendMessage({
     type: 'FETCH_AND_UPLOAD',
@@ -62,9 +97,11 @@ async function upload(payload) {
     settings,
     sourceTabUrl: tab?.url || ''
   });
+
   if (!response?.ok) {
     throw new Error(response?.error || 'アップロードに失敗しました。');
   }
+
   return response;
 }
 
@@ -80,10 +117,12 @@ el.scanPage.addEventListener('click', async () => {
   try {
     const result = await sendMessageToTab('SCAN_PDFS');
     if (!result?.ok) throw new Error(result?.error || '検出に失敗しました。');
+
     if (!result.items.length) {
       setStatus('このページではPDFリンクを見つけられませんでした。');
       return;
     }
+
     const first = result.items[0];
     await chrome.storage.local.set({ lastDetected: first, allDetected: result.items });
     setStatus(`検出件数: ${result.items.length}\n最初のPDF:\n${first.url}`);
@@ -96,6 +135,7 @@ el.uploadCurrent.addEventListener('click', async () => {
   try {
     const state = await chrome.storage.local.get(['lastDetected']);
     if (!state.lastDetected?.url) throw new Error('先にPDFを検出してください。');
+
     setStatus('PDF取得とNotion送信を開始します...');
     const result = await upload(state.lastDetected);
     setStatus(`完了:\n${result.message}`);
@@ -108,6 +148,7 @@ el.uploadManual.addEventListener('click', async () => {
   try {
     const tab = await getActiveTab();
     if (!tab?.url) throw new Error('現在タブのURLを取得できません。');
+
     setStatus('現在タブのURLをPDFとして取得します...');
     const result = await upload({ url: tab.url, title: tab.title || 'current-tab.pdf' });
     setStatus(`完了:\n${result.message}`);
