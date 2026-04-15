@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "KU Student PDF to Notion",
+  "version": "0.1.0",
+  "description": "Fetch authenticated PDFs from a university portal after manual login/OTP and upload them into a Notion page.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://*.notion.com/*",
+    "https://api.notion.com/*",
+    "https://www.notion.so/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "KU Student PDF to Notion",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
