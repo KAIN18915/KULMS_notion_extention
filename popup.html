@@ -20,7 +20,7 @@
       background: var(--bg);
       color: var(--text);
       margin: 0;
-      width: 380px;
+      width: 420px;
     }
     .wrap { padding: 16px; }
     h1 { font-size: 18px; margin: 0 0 12px; }
@@ -33,7 +33,7 @@
       margin-bottom: 12px;
     }
     label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; }
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       box-sizing: border-box;
       border: 1px solid var(--border);
@@ -43,7 +43,7 @@
       background: #fff;
       margin-bottom: 10px;
     }
-    textarea { min-height: 72px; resize: vertical; }
+    textarea { min-height: 68px; resize: vertical; }
     button {
       width: 100%;
       border: none;
@@ -67,7 +67,7 @@
       border: 1px dashed var(--border);
       border-radius: 10px;
       padding: 10px;
-      min-height: 72px;
+      min-height: 92px;
     }
     .small { font-size: 11px; color: var(--muted); }
   </style>
@@ -75,19 +75,32 @@
 <body>
   <div class="wrap">
     <h1>KU Student PDF to Notion</h1>
-    <p>学内サイトでログインとOTPを終えた状態で、PDFリンクを検出してNotionページへ送ります。</p>
+    <p>学内サイトでログインとOTPを終えた状態で、PDFを取得してNotionの選択したページへ埋め込みます。</p>
 
     <div class="card">
       <label for="notionToken">Notion Integration Token</label>
       <input id="notionToken" type="password" placeholder="secret_xxx">
 
-      <label for="pageId">Notion Page ID</label>
-      <input id="pageId" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+      <label for="databaseId">Notion Database ID または URL</label>
+      <input id="databaseId" type="text" placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx または database URL">
+
+      <div class="row">
+        <button id="saveSettings" class="secondary">設定を保存</button>
+        <button id="loadDatabasePages" class="secondary">DBからページ取得</button>
+      </div>
+
+      <label for="dataSourceSelect">Data Source</label>
+      <select id="dataSourceSelect">
+        <option value="">先にDBからページ取得</option>
+      </select>
+
+      <label for="pageSelect">PDF埋め込み先ページ</label>
+      <select id="pageSelect">
+        <option value="">先にページ一覧を取得</option>
+      </select>
 
       <label for="allowedHosts">許可ホスト（改行区切り、任意）</label>
       <textarea id="allowedHosts" placeholder="pandora.ecs.kyoto-u.ac.jp\nexample.ac.jp"></textarea>
-
-      <button id="saveSettings" class="secondary">設定を保存</button>
     </div>
 
     <div class="card">
