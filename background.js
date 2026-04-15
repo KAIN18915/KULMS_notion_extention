@@ -1,13 +1,30 @@
-const NOTION_VERSION = '2023-11-06';
+const NOTION_VERSION = '2026-03-11';
 
-function sanitizePageId(pageId) {
-  return (pageId || '').replace(/[^a-fA-F0-9]/g, '');
+function normalizeNotionId(id) {
+  const raw = (id || '').trim();
+  const hex = raw.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+
+  if (hex.length !== 32) {
+    throw new Error(
+      `Notion Page ID が不正です。32桁のIDを入れてください。現在: ${raw}`
+    );
+  }
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32)
+  ].join('-');
 }
 
 function allowedHostCheck(url, allowedHosts = []) {
   if (!allowedHosts.length) return true;
   const host = new URL(url).hostname;
-  return allowedHosts.some(allowed => host === allowed || host.endsWith(`.${allowed}`));
+  return allowedHosts.some(
+    allowed => host === allowed || host.endsWith(`.${allowed}`)
+  );
 }
 
 function guessFilename(payload, response) {
@@ -36,7 +53,9 @@ async function fetchPdfAsBlob(url) {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('pdf') && !contentType.includes('octet-stream')) {
     const firstText = await response.clone().text().catch(() => '');
-    throw new Error(`PDF以外の応答です。content-type=${contentType} ${firstText.slice(0, 80)}`);
+    throw new Error(
+      `PDF以外の応答です。content-type=${contentType} ${firstText.slice(0, 120)}`
+    );
   }
 
   return { blob: await response.blob(), response };
@@ -70,63 +89,79 @@ async function notionFetch(path, token, options = {}) {
   return json;
 }
 
-async function createSinglePartFileUpload({ token, filename, blob }) {
-  const createPayload = {
-    mode: 'single_part',
-    filename,
-    content_type: blob.type || 'application/pdf'
-  };
-
+async function createFileUpload({ token }) {
   return notionFetch('/file_uploads', token, {
     method: 'POST',
-    body: JSON.stringify(createPayload)
+    body: JSON.stringify({})
   });
 }
 
-function extractUploadInfo(created) {
+function extractFileUploadId(created) {
+  const fileUploadId = created?.id || created?.file_upload?.id;
   const uploadUrl =
     created?.upload_url ||
-    created?.signed_put_url ||
-    created?.file_upload?.upload_url ||
-    created?.file_upload?.signed_put_url ||
-    created?.file_upload?.url;
+    created?.file_upload?.upload_url;
 
-  const fileUploadId =
-    created?.id ||
-    created?.file_upload?.id;
-
-  if (!uploadUrl || !fileUploadId) {
+  if (!fileUploadId || !uploadUrl) {
     throw new Error(
-      'Notionのfile_upload作成応答から upload_url / id を取得できませんでした。API仕様変更の可能性があります。'
+      'Notionのfile_upload作成応答から id / upload_url を取得できませんでした。'
     );
   }
 
-  return { uploadUrl, fileUploadId };
+  return { fileUploadId, uploadUrl };
 }
 
-async function sendSinglePartFile({ uploadUrl, blob }) {
-  const put = await fetch(uploadUrl, {
-    method: 'PUT',
+async function sendFileToNotion({ token, uploadUrl, blob, filename }) {
+  const formData = new FormData();
+  formData.append('file', blob, filename);
+
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
     headers: {
-      'Content-Type': blob.type || 'application/pdf'
+      Authorization: `Bearer ${token}`,
+      'Notion-Version': NOTION_VERSION
     },
-    body: blob
+    body: formData
   });
 
-  if (!put.ok) {
-    const errorText = await put.text().catch(() => '');
-    throw new Error(`Notionへの実ファイル送信に失敗しました: HTTP ${put.status} ${errorText.slice(0, 200)}`);
+  const text = await response.text();
+  let json;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    json = { raw: text };
   }
+
+  if (!response.ok) {
+    throw new Error(`Notion send error ${response.status}: ${json.message || text}`);
+  }
+
+  return json;
 }
 
 async function uploadFileToNotion({ token, filename, blob }) {
-  const created = await createSinglePartFileUpload({ token, filename, blob });
-  const { uploadUrl, fileUploadId } = extractUploadInfo(created);
-  await sendSinglePartFile({ uploadUrl, blob });
+  const created = await createFileUpload({ token });
+  const { fileUploadId, uploadUrl } = extractFileUploadId(created);
+
+  await sendFileToNotion({
+    token,
+    uploadUrl,
+    blob,
+    filename
+  });
+
   return fileUploadId;
 }
 
-async function appendPdfBlockToPage({ token, pageId, fileUploadId, filename, sourceUrl }) {
+async function appendPdfBlockToPage({
+  token,
+  pageId,
+  fileUploadId,
+  filename,
+  sourceUrl
+}) {
+  const normalizedPageId = normalizeNotionId(pageId);
+
   const body = {
     children: [
       {
@@ -164,7 +199,7 @@ async function appendPdfBlockToPage({ token, pageId, fileUploadId, filename, sou
     ]
   };
 
-  return notionFetch(`/blocks/${sanitizePageId(pageId)}/children`, token, {
+  return notionFetch(`/blocks/${normalizedPageId}/children`, token, {
     method: 'PATCH',
     body: JSON.stringify(body)
   });
@@ -176,7 +211,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     const { payload, settings } = message;
     const token = settings?.notionToken?.trim();
-    const pageId = sanitizePageId(settings?.pageId?.trim());
+    const pageId = settings?.pageId?.trim();
 
     if (!token || !pageId) {
       throw new Error('Notion設定が不足しています。');
