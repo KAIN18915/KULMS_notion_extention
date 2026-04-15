@@ -40,14 +40,15 @@ function allowedHostCheck(url, allowedHosts = []) {
   );
 }
 
-function guessFilename(payload, response) {
+function guessFilename(payload, response, fallbackUrl = null) {
   const disposition = response.headers.get('content-disposition') || '';
   const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i);
   if (match?.[1]) {
     return decodeURIComponent(match[1].replace(/\"/g, ''));
   }
 
-  const fromUrl = new URL(payload.url).pathname.split('/').pop();
+  const urlToUse = fallbackUrl || payload.url;
+  const fromUrl = new URL(urlToUse).pathname.split('/').pop();
   if (fromUrl && fromUrl.includes('.')) {
     return fromUrl;
   }
@@ -57,26 +58,96 @@ function guessFilename(payload, response) {
   return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
 }
 
-async function fetchPdfAsBlob(url) {
-  const response = await fetch(url, {
+async function fetchWithSession(url) {
+  return fetch(url, {
     method: 'GET',
     credentials: 'include',
     redirect: 'follow'
   });
+}
+
+function extractPdfCandidatesFromHtml(html, baseUrl) {
+  const candidates = new Set();
+
+  const patterns = [
+    /<iframe[^>]+src=["']([^"']+)["']/gi,
+    /<embed[^>]+src=["']([^"']+)["']/gi,
+    /<object[^>]+data=["']([^"']+)["']/gi,
+    /<a[^>]+href=["']([^"']+)["']/gi
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(html)) !== null) {
+      try {
+        const abs = new URL(match[1], baseUrl).href;
+        if (
+          /\.pdf(\?|#|$)/i.test(abs) ||
+          /pdf/i.test(abs) ||
+          /content-type=application%2Fpdf/i.test(abs) ||
+          /content-type=application\/pdf/i.test(abs)
+        ) {
+          candidates.add(abs);
+        }
+      } catch {
+        // ignore malformed URL
+      }
+    }
+  }
+
+  return [...candidates];
+}
+
+async function fetchPdfAsBlob(url, depth = 0, visited = new Set()) {
+  if (depth > 3) {
+    throw new Error('PDF URLの追跡が深すぎます。中継ページが多すぎます。');
+  }
+
+  if (visited.has(url)) {
+    throw new Error('PDF URL追跡中に循環参照を検出しました。');
+  }
+  visited.add(url);
+
+  const response = await fetchWithSession(url);
 
   if (!response.ok) {
     throw new Error(`PDF取得失敗: HTTP ${response.status}`);
   }
 
   const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('pdf') && !contentType.includes('octet-stream')) {
-    const firstText = await response.clone().text().catch(() => '');
+
+  if (contentType.includes('pdf') || contentType.includes('octet-stream')) {
+    return {
+      blob: await response.blob(),
+      response,
+      finalUrl: response.url || url
+    };
+  }
+
+  if (contentType.includes('text/html')) {
+    const html = await response.text();
+    const candidates = extractPdfCandidatesFromHtml(html, response.url || url);
+
+    if (!candidates.length) {
+      throw new Error(
+        `PDF以外の応答です。content-type=${contentType} HTML内からPDFリンクを見つけられませんでした。先頭: ${html.slice(0, 120)}`
+      );
+    }
+
+    for (const candidate of candidates) {
+      try {
+        return await fetchPdfAsBlob(candidate, depth + 1, visited);
+      } catch {
+        // try next candidate
+      }
+    }
+
     throw new Error(
-      `PDF以外の応答です。content-type=${contentType} ${firstText.slice(0, 120)}`
+      `HTML内にPDF候補はありましたが取得できませんでした。候補数=${candidates.length}`
     );
   }
 
-  return { blob: await response.blob(), response };
+  throw new Error(`PDF以外の応答です。content-type=${contentType}`);
 }
 
 async function notionFetch(path, token, options = {}) {
@@ -244,8 +315,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       throw new Error('このホストは許可リストに入っていません。');
     }
 
-    const { blob, response } = await fetchPdfAsBlob(payload.url);
-    const filename = guessFilename(payload, response);
+    const { blob, response, finalUrl } = await fetchPdfAsBlob(payload.url);
+    const filename = guessFilename(payload, response, finalUrl);
     const fileUploadId = await uploadFileToNotion({ token, filename, blob });
 
     await appendPdfBlockToPage({
@@ -253,7 +324,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       pageId,
       fileUploadId,
       filename,
-      sourceUrl: payload.url
+      sourceUrl: finalUrl || payload.url
     });
 
     sendResponse({
