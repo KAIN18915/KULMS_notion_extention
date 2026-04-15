@@ -1,22 +1,35 @@
 const NOTION_VERSION = '2026-03-11';
 
-function normalizeNotionId(id) {
-  const raw = (id || '').trim();
-  const hex = raw.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
-
-  if (hex.length !== 32) {
-    throw new Error(
-      `Notion Page ID が不正です。32桁のIDを入れてください。現在: ${raw}`
-    );
+function normalizeNotionId(input) {
+  const raw = (input || '').trim();
+  if (!raw) {
+    throw new Error('Notion Page ID が空です。');
   }
 
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20, 32)
-  ].join('-');
+  const directHex = raw.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+  if (directHex.length === 32) {
+    return [
+      directHex.slice(0, 8),
+      directHex.slice(8, 12),
+      directHex.slice(12, 16),
+      directHex.slice(16, 20),
+      directHex.slice(20, 32)
+    ].join('-');
+  }
+
+  const matches = raw.match(/[a-fA-F0-9]{32}/g);
+  if (matches && matches.length > 0) {
+    const hex = matches[matches.length - 1].toLowerCase();
+    return [
+      hex.slice(0, 8),
+      hex.slice(8, 12),
+      hex.slice(12, 16),
+      hex.slice(16, 20),
+      hex.slice(20, 32)
+    ].join('-');
+  }
+
+  throw new Error(`Notion Page ID が不正です。現在: ${raw}`);
 }
 
 function allowedHostCheck(url, allowedHosts = []) {
@@ -30,13 +43,18 @@ function allowedHostCheck(url, allowedHosts = []) {
 function guessFilename(payload, response) {
   const disposition = response.headers.get('content-disposition') || '';
   const match = disposition.match(/filename\*?=(?:UTF-8''|\")?([^\";]+)/i);
-  if (match?.[1]) return decodeURIComponent(match[1].replace(/\"/g, ''));
+  if (match?.[1]) {
+    return decodeURIComponent(match[1].replace(/\"/g, ''));
+  }
 
   const fromUrl = new URL(payload.url).pathname.split('/').pop();
-  if (fromUrl && fromUrl.includes('.')) return fromUrl;
+  if (fromUrl && fromUrl.includes('.')) {
+    return fromUrl;
+  }
 
   const title = payload.title || 'document';
-  return `${title.replace(/[^\w.-]+/g, '_')}.pdf`;
+  const safe = title.replace(/[^\w.-]+/g, '_');
+  return safe.toLowerCase().endsWith('.pdf') ? safe : `${safe}.pdf`;
 }
 
 async function fetchPdfAsBlob(url) {
@@ -96,16 +114,17 @@ async function createFileUpload({ token }) {
   });
 }
 
-function extractFileUploadId(created) {
-  const fileUploadId = created?.id || created?.file_upload?.id;
+function extractFileUploadInfo(created) {
+  const fileUploadId =
+    created?.id ||
+    created?.file_upload?.id;
+
   const uploadUrl =
     created?.upload_url ||
     created?.file_upload?.upload_url;
 
   if (!fileUploadId || !uploadUrl) {
-    throw new Error(
-      'Notionのfile_upload作成応答から id / upload_url を取得できませんでした。'
-    );
+    throw new Error('Notionのfile_upload作成応答から id / upload_url を取得できませんでした。');
   }
 
   return { fileUploadId, uploadUrl };
@@ -141,7 +160,7 @@ async function sendFileToNotion({ token, uploadUrl, blob, filename }) {
 
 async function uploadFileToNotion({ token, filename, blob }) {
   const created = await createFileUpload({ token });
-  const { fileUploadId, uploadUrl } = extractFileUploadId(created);
+  const { fileUploadId, uploadUrl } = extractFileUploadInfo(created);
 
   await sendFileToNotion({
     token,
@@ -180,8 +199,8 @@ async function appendPdfBlockToPage({
       },
       {
         object: 'block',
-        type: 'file',
-        file: {
+        type: 'pdf',
+        pdf: {
           type: 'file_upload',
           file_upload: {
             id: fileUploadId
@@ -239,7 +258,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
     sendResponse({
       ok: true,
-      message: `Notionへ送信しました: ${filename}`
+      message: `NotionへPDF埋め込みを追加しました: ${filename}`
     });
   })().catch(error => {
     sendResponse({
